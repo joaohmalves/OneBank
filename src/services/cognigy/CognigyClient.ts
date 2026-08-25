@@ -1,0 +1,2 @@
+import type { CallState, CognigyInfo, TranscriptMessage } from '../../types/cognigy';
+export interface CognigyClient { connect(): Promise<void>; disconnect(): Promise<void>; startCall(): Promise<void>; endCall(): Promise<void>; setMuted(muted: boolean): Promise<void>; sendInfo(info: CognigyInfo): Promise<void>; onInfoReceived(cb: (info: CognigyInfo) => void): () => void; onTranscript(cb: (message: TranscriptMessage) => void): () => void; onCallStateChange(cb: (state: CallState) => void): () => void; }

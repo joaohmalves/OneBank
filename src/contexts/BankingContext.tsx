@@ -1,0 +1,8 @@
+import { createContext, useContext, useState, type ReactNode } from 'react';
+import { cards } from '../mocks/data';
+import type { CardId } from '../types/banking';
+interface Comparison { cardA: CardId; cardB: CardId; }
+interface BankingValue { selectedCard: CardId; section: string; highlight: string | null; comparison: Comparison | null; cardDetail: CardId | null; selectCard:(id:CardId)=>void; showSection:(section:string)=>void; openComparison:(a:CardId,b:CardId)=>void; closeComparison:()=>void; openCardDetail:(id:CardId)=>void; closeCardDetail:()=>void; }
+const BankingContext=createContext<BankingValue|null>(null);
+export function BankingProvider({children}:{children:ReactNode}) { const [selectedCard,setSelectedCard]=useState<CardId>(cards[0].id); const [section,setSection]=useState('overview'); const [highlight,setHighlight]=useState<string|null>(null); const [comparison,setComparison]=useState<Comparison|null>(null); const [cardDetail,setCardDetail]=useState<CardId|null>(null); const showSection=(value:string)=>{setSection(value);setHighlight(value);window.setTimeout(()=>setHighlight(null),4200);}; return <BankingContext.Provider value={{selectedCard,section,highlight,comparison,cardDetail,selectCard:setSelectedCard,showSection,openComparison:(cardA,cardB)=>setComparison({cardA,cardB}),closeComparison:()=>setComparison(null),openCardDetail:(id)=>{setSelectedCard(id);setCardDetail(id);},closeCardDetail:()=>setCardDetail(null)}}>{children}</BankingContext.Provider>; }
+export const useBanking=()=>{const value=useContext(BankingContext);if(!value)throw new Error('useBanking deve estar dentro de BankingProvider');return value;};
