@@ -1,4 +1,4 @@
-import type { Card, Customer, Purchase } from '../types/banking';
+import type { Card, Customer, Purchase } from '../types/banking.js';
 export const customer: Customer = { name: 'João Henrique', agency: '0001', account: '12345-6', balance: 8450.32 };
 export const cards: Card[] = [
   { id: 'black', name: 'OneBank Black', number: '**** **** **** 4821', holder: 'JOÃO HENRIQUE', expiry: '12/29', limit: 15000, availableLimit: 10719.5, color: 'black', perks: { Cashback: '2%', 'Sala VIP': 'Sim', 'Seguro viagem': 'Sim', Anuidade: 'R$ 600', Pontos: '2,5 pts/USD' } },
