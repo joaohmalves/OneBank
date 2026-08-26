@@ -1,11 +1,17 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { useLocation } from 'react-router-dom';
+import { useBanking } from '../../contexts/BankingContext';
+import { buildPageContext } from '../../services/cognigy/pageContext';
+
+// Sessão SIP ativa do Click-to-Call (existe só durante uma chamada em andamento).
+interface ActiveSession { sendInfo: (text: string, data?: unknown) => void; }
 
 declare global {
   interface Window {
     initWebRTCWidget?: (
       endpointUrl: string,
       options?: unknown
-    ) => Promise<unknown>;
+    ) => Promise<{ on: (event: string, cb: (arg: unknown) => void) => void }>;
   }
 }
 
@@ -15,6 +21,24 @@ export function CognigyWidgetEmbed() {
   const endpointUrl = import.meta.env.VITE_COGNIGY_ENDPOINT_URL;
   const [error, setError] = useState('');
   const [open, setOpen] = useState(false);
+  const location = useLocation();
+  const bank = useBanking();
+  const sessionRef = useRef<ActiveSession | null>(null);
+
+  // Sempre que a tela mudar (rota, seção, cartão aberto, comparação), avisa o agente
+  // enquanto houver uma chamada ativa — assim ele "enxerga" o que o cliente está vendo.
+  useEffect(() => {
+    if (!sessionRef.current) return;
+    const context = buildPageContext({
+      pathname: location.pathname,
+      section: bank.section,
+      selectedCard: bank.selectedCard,
+      cardOpen: bank.cardDetail,
+      comparisonOpen: bank.comparison,
+    });
+    sessionRef.current.sendInfo('', { pageContext: context });
+  }, [location.pathname, bank.section, bank.selectedCard, bank.cardDetail, bank.comparison]);
+
 
   useEffect(() => {
     document.body.classList.toggle('cognigy-drawer-open', open);
@@ -116,11 +140,32 @@ export function CognigyWidgetEmbed() {
 
           ui: {
             labels: {
-              callButton: 'Falar com a Julia',
+              callButton: 'Falar com a Carla',
               endButton: 'Encerrar chamada',
-              listenLabel: 'Julia está ouvindo',
+              listenLabel: 'Carla está ouvindo',
             },
           },
+        })
+        .then((widget) => {
+          // Captura a sessão ativa pra podermos enviar a "visão" da página (session.sendInfo)
+          // e limpa a referência quando a chamada terminar.
+          widget.on('newRTCSession', (raw) => {
+            const session = raw as ActiveSession & { on: (event: string, cb: () => void) => void };
+            session.on('accepted', () => {
+              sessionRef.current = session;
+              session.sendInfo('', {
+                pageContext: buildPageContext({
+                  pathname: location.pathname,
+                  section: bank.section,
+                  selectedCard: bank.selectedCard,
+                  cardOpen: bank.cardDetail,
+                  comparisonOpen: bank.comparison,
+                }),
+              });
+            });
+            session.on('ended', () => { sessionRef.current = null; });
+            session.on('terminated', () => { sessionRef.current = null; });
+          });
         })
         .catch((reason: unknown) => {
           console.error(
@@ -198,7 +243,7 @@ export function CognigyWidgetEmbed() {
           className="cognigy-launcher"
           onClick={() => setOpen(true)}
         >
-          Ligar para Julia
+          Ligar para Carla
         </button>
       )}
 

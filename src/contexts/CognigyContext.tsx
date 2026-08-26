@@ -15,7 +15,7 @@ export function CognigyProvider({children, client=mockClient}:{children:ReactNod
   // Canal separado: eventos que a Cognigy manda via HTTP direto pro backend (POST /api/cognigy/event),
   // que o servidor repassa em tempo real por SSE. Independe do client (mock ou real) usado pra voz/chat.
   useEffect(()=>{
-    const source=new EventSource(apiUrl('/api/cognigy/stream'));
+    const source=new EventSource(apiUrl('/api/onebank/cognigy/stream'));
     source.onmessage=(message)=>{
       try{ dispatchCognigyEvent(JSON.parse(message.data) as CognigyEvent); }
       catch(err){ console.error('[Cognigy SSE] payload inválido', err); }
