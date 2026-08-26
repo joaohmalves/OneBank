@@ -116,9 +116,9 @@ export function CognigyWidgetEmbed() {
 
           ui: {
             labels: {
-              callButton: 'Falar com a Carla',
+              callButton: 'Falar com a Julia',
               endButton: 'Encerrar chamada',
-              listenLabel: 'Carla está ouvindo',
+              listenLabel: 'Julia está ouvindo',
             },
           },
         })
@@ -198,7 +198,7 @@ export function CognigyWidgetEmbed() {
           className="cognigy-launcher"
           onClick={() => setOpen(true)}
         >
-          Ligar para Carla
+          Ligar para Julia
         </button>
       )}
 
