@@ -66,7 +66,7 @@
 }
 
 .cognigy-drawer-open .app{
-    margin-right:430px;
+    margin-right:300px;
 }
 
 /* =========================================================
@@ -715,10 +715,24 @@ header{
     display:flex;
     align-items:center;
     justify-content:space-between;
+    gap:16px;
 
     background:#fff;
 
     border-bottom:1px solid #e7ecf4
+}
+
+header>div:not(.header-actions){
+    min-width:0;
+    overflow:hidden
+}
+
+header h2{
+    font-size:17px;
+    margin:4px 0 0;
+    white-space:nowrap;
+    overflow:hidden;
+    text-overflow:ellipsis
 }
 
 header small,
@@ -735,7 +749,8 @@ header h2{
 .header-actions{
     display:flex;
     align-items:center;
-    gap:11px
+    gap:11px;
+    flex-shrink:0
 }
 
 .icon{
@@ -748,7 +763,9 @@ header h2{
     background:#f1f4f9;
 
     display:grid;
-    place-items:center
+    place-items:center;
+
+    flex-shrink:0
 }
 
 .avatar{
@@ -757,6 +774,8 @@ header h2{
 
     width:39px;
     height:39px;
+
+    flex-shrink:0;
 
     border-radius:50%;
 
@@ -1566,7 +1585,7 @@ header h2{
 
     inset:0;
 
-    z-index:10;
+    z-index:20000;
 
     background:#0815288c;
 
