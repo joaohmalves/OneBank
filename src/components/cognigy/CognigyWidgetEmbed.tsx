@@ -2,9 +2,21 @@ import { useEffect, useRef, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import { useBanking } from '../../contexts/BankingContext';
 import { buildPageContext } from '../../services/cognigy/pageContext';
+import { apiUrl } from '../../services/apiBaseUrl';
 
-// Sessão SIP ativa do Click-to-Call (existe só durante uma chamada em andamento).
-interface ActiveSession { sendInfo: (text: string, data?: unknown) => void; }
+// Não é chamada WebRTC direta — é uma ligação de telefonia real via Cognigy
+// Voice Gateway, então session.sendInfo() do navegador NUNCA chega no Flow.
+// A "visão" da página vai por outro caminho: nosso backend usa a Inject API
+// do Cognigy (server-to-server) usando o mesmo userId da chamada.
+const COGNIGY_USER_ID = import.meta.env.VITE_COGNIGY_USER_ID || 'onebank-demo-user';
+
+function sendPageContextToBackend(pageContext: unknown) {
+  fetch(apiUrl('/api/cognigy/banking/page-context'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ userId: COGNIGY_USER_ID, pageContext }),
+  }).catch(() => { /* chamada pode não estar ativa ainda; sem problema */ });
+}
 
 declare global {
   interface Window {
@@ -23,20 +35,19 @@ export function CognigyWidgetEmbed() {
   const [open, setOpen] = useState(false);
   const location = useLocation();
   const bank = useBanking();
-  const sessionRef = useRef<ActiveSession | null>(null);
+  const callActiveRef = useRef(false);
 
   // Sempre que a tela mudar (rota, seção, cartão aberto, comparação), avisa o agente
   // enquanto houver uma chamada ativa — assim ele "enxerga" o que o cliente está vendo.
   useEffect(() => {
-    if (!sessionRef.current) return;
-    const context = buildPageContext({
+    if (!callActiveRef.current) return;
+    sendPageContextToBackend(buildPageContext({
       pathname: location.pathname,
       section: bank.section,
       selectedCard: bank.selectedCard,
       cardOpen: bank.cardDetail,
       comparisonOpen: bank.comparison,
-    });
-    sessionRef.current.sendInfo('', { pageContext: context });
+    }));
   }, [location.pathname, bank.section, bank.selectedCard, bank.cardDetail, bank.comparison]);
 
 
@@ -140,31 +151,28 @@ export function CognigyWidgetEmbed() {
 
           ui: {
             labels: {
-              callButton: 'Falar com a Julia',
+              callButton: 'Falar com a Carla',
               endButton: 'Encerrar chamada',
-              listenLabel: 'Julia está ouvindo',
+              listenLabel: 'Carla está ouvindo',
             },
           },
         })
         .then((widget) => {
-          // Captura a sessão ativa pra podermos enviar a "visão" da página (session.sendInfo)
-          // e limpa a referência quando a chamada terminar.
+          // Marca a chamada como ativa/inativa, pra saber quando mandar contexto.
           widget.on('newRTCSession', (raw) => {
-            const session = raw as ActiveSession & { on: (event: string, cb: () => void) => void };
+            const session = raw as { on: (event: string, cb: () => void) => void };
             session.on('accepted', () => {
-              sessionRef.current = session;
-              session.sendInfo('', {
-                pageContext: buildPageContext({
-                  pathname: location.pathname,
-                  section: bank.section,
-                  selectedCard: bank.selectedCard,
-                  cardOpen: bank.cardDetail,
-                  comparisonOpen: bank.comparison,
-                }),
-              });
+              callActiveRef.current = true;
+              sendPageContextToBackend(buildPageContext({
+                pathname: location.pathname,
+                section: bank.section,
+                selectedCard: bank.selectedCard,
+                cardOpen: bank.cardDetail,
+                comparisonOpen: bank.comparison,
+              }));
             });
-            session.on('ended', () => { sessionRef.current = null; });
-            session.on('terminated', () => { sessionRef.current = null; });
+            session.on('ended', () => { callActiveRef.current = false; });
+            session.on('terminated', () => { callActiveRef.current = false; });
           });
         })
         .catch((reason: unknown) => {
@@ -243,7 +251,7 @@ export function CognigyWidgetEmbed() {
           className="cognigy-launcher"
           onClick={() => setOpen(true)}
         >
-          Ligar para Julia
+          Ligar para Carla
         </button>
       )}
 
