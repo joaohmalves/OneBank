@@ -8,7 +8,7 @@ interface AuthValue {
 
 const AuthContext = createContext<AuthValue | null>(null);
 
-const API_URL = import.meta.env.VITE_API_URL as string;
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL as string;
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [authenticated, setAuthenticated] = useState(
@@ -40,7 +40,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     (async () => {
       try {
-        const res = await fetch(`${API_URL}/api/auth/redeem-code`, {
+        const res = await fetch(`${API_BASE_URL}/api/auth/redeem-code`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ code }),
