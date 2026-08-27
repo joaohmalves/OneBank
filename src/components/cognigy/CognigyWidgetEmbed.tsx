@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import { useBanking } from '../../contexts/BankingContext';
-import { buildPageContext } from '../../services/cognigy/pageContext';
+import { buildPageContext, buildPageDescription } from '../../services/cognigy/pageContext';
 import { apiUrl } from '../../services/apiBaseUrl';
 
 // Não é chamada WebRTC direta — é uma ligação de telefonia real via Cognigy
@@ -10,12 +10,17 @@ import { apiUrl } from '../../services/apiBaseUrl';
 // do Cognigy (server-to-server) usando o mesmo userId da chamada.
 const COGNIGY_USER_ID = import.meta.env.VITE_COGNIGY_USER_ID || 'onebank-demo-user';
 
-function sendPageContextToBackend(pageContext: unknown) {
+function sendPageContextToBackend(pageContext: unknown, pageDescription: string) {
   fetch(apiUrl('/api/cognigy/banking/page-context'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ userId: COGNIGY_USER_ID, pageContext }),
-  }).catch(() => { /* chamada pode não estar ativa ainda; sem problema */ });
+    body: JSON.stringify({ userId: COGNIGY_USER_ID, pageContext, pageDescription }),
+  })
+    .then(async (res) => {
+      const body = await res.json().catch(() => null);
+      console.log('[pageContext] enviado', res.status, body);
+    })
+    .catch((err) => console.error('[pageContext] falhou (rede)', err));
 }
 
 declare global {
@@ -40,13 +45,15 @@ export function CognigyWidgetEmbed() {
   // Sempre que a tela mudar (rota, seção, cartão aberto, comparação), avisa o agente
   // enquanto houver uma chamada ativa — assim ele "enxerga" o que o cliente está vendo.
   useEffect(() => {
-    sendPageContextToBackend(buildPageContext({
+    if (!callActiveRef.current) return;
+    const args = {
       pathname: location.pathname,
       section: bank.section,
       selectedCard: bank.selectedCard,
       cardOpen: bank.cardDetail,
       comparisonOpen: bank.comparison,
-    }));
+    };
+    sendPageContextToBackend(buildPageContext(args), buildPageDescription(args));
   }, [location.pathname, bank.section, bank.selectedCard, bank.cardDetail, bank.comparison]);
 
 
@@ -162,13 +169,14 @@ export function CognigyWidgetEmbed() {
             const session = raw as { on: (event: string, cb: () => void) => void };
             session.on('accepted', () => {
               callActiveRef.current = true;
-              sendPageContextToBackend(buildPageContext({
+              const args = {
                 pathname: location.pathname,
                 section: bank.section,
                 selectedCard: bank.selectedCard,
                 cardOpen: bank.cardDetail,
                 comparisonOpen: bank.comparison,
-              }));
+              };
+              sendPageContextToBackend(buildPageContext(args), buildPageDescription(args));
             });
             session.on('ended', () => { callActiveRef.current = false; });
             session.on('terminated', () => { callActiveRef.current = false; });
