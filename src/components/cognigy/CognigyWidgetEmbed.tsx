@@ -94,6 +94,8 @@ export function CognigyWidgetEmbed() {
      * usamos um MutationObserver.
      */
 
+    let observer: MutationObserver | null = null;
+
     const fixCognigyTranscriptStructure = () => {
       const container = document.querySelector(
         '.webrtc_widget_container'
@@ -103,46 +105,70 @@ export function CognigyWidgetEmbed() {
         '.webrtc_widget_transcript_wrapper'
       );
 
-      // O Cognigy ainda não criou os elementos
       if (!container || !transcriptWrapper) {
         return;
       }
 
-      // Já está dentro do container, não precisa fazer nada
       if (transcriptWrapper.parentElement === container) {
         return;
       }
 
-      // Move o transcript para dentro do container
       container.insertBefore(
         transcriptWrapper,
         container.firstChild
       );
     };
 
-    /*
-     * Observa o DOM porque o Cognigy cria/recria
-     * os elementos do Click-to-Call dinamicamente.
-     */
-    const observer = new MutationObserver(() => {
-      requestAnimationFrame(() => {
-        fixCognigyTranscriptStructure();
+    // Só liga o observer DEPOIS que o widget terminar de se montar.
+    // Ligar em paralelo com a inicialização dele causa uma corrida: mexemos no
+    // DOM bem no meio do processo interno do widget (ele ainda está buscando o
+    // asset de áudio), e isso trava o carregamento na primeira vez que a página
+    // abre (só "destrava" com F5 porque aí o timing muda).
+    const startObservingAfterWidgetReady = () => {
+      if (observer) return;
+      observer = new MutationObserver(() => {
+        requestAnimationFrame(() => {
+          fixCognigyTranscriptStructure();
+        });
       });
-    });
-
-    observer.observe(document.body, {
-      childList: true,
-      subtree: true,
-    });
-
-    // Tenta corrigir caso o widget já exista
-    fixCognigyTranscriptStructure();
+      observer.observe(document.body, { childList: true, subtree: true });
+      fixCognigyTranscriptStructure();
+    };
 
     /*
      * =====================================================
      * INICIALIZAÇÃO DO COGNIGY
      * =====================================================
      */
+
+    // Detecta chamada ativa observando a própria classe do widget, em vez dos
+    // eventos newRTCSession/accepted (que não disparam nesse tipo de ligação
+    // via Voice Gateway). O container do Cognigy usa uma classe "..._idle"
+    // quando não há ligação; quando ela some, a ligação está em andamento.
+    let callObserver: MutationObserver | null = null;
+    const startWatchingCallState = () => {
+      if (callObserver) return;
+      const check = () => {
+        const container = document.querySelector('.webrtc_widget_content_container');
+        const isActive = !!container && !container.className.includes('_idle');
+        if (isActive && !callActiveRef.current) {
+          callActiveRef.current = true;
+          const args = {
+            pathname: location.pathname,
+            section: bank.section,
+            selectedCard: bank.selectedCard,
+            cardOpen: bank.cardDetail,
+            comparisonOpen: bank.comparison,
+          };
+          sendPageContextToBackend(buildPageContext(args), buildPageDescription(args));
+        } else if (!isActive && callActiveRef.current) {
+          callActiveRef.current = false;
+        }
+      };
+      callObserver = new MutationObserver(check);
+      callObserver.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['class'] });
+      check();
+    };
 
     const initialize = () => {
       if (initialization || !window.initWebRTCWidget) {
@@ -163,24 +189,11 @@ export function CognigyWidgetEmbed() {
             },
           },
         })
-        .then((widget) => {
-          // Marca a chamada como ativa/inativa, pra saber quando mandar contexto.
-          widget.on('newRTCSession', (raw) => {
-            const session = raw as { on: (event: string, cb: () => void) => void };
-            session.on('accepted', () => {
-              callActiveRef.current = true;
-              const args = {
-                pathname: location.pathname,
-                section: bank.section,
-                selectedCard: bank.selectedCard,
-                cardOpen: bank.cardDetail,
-                comparisonOpen: bank.comparison,
-              };
-              sendPageContextToBackend(buildPageContext(args), buildPageDescription(args));
-            });
-            session.on('ended', () => { callActiveRef.current = false; });
-            session.on('terminated', () => { callActiveRef.current = false; });
-          });
+        .then(() => {
+          // Só agora, com o widget pronto, começamos a corrigir a estrutura do DOM
+          // e a observar o estado da chamada.
+          startObservingAfterWidgetReady();
+          startWatchingCallState();
         })
         .catch((reason: unknown) => {
           console.error(
@@ -200,7 +213,8 @@ export function CognigyWidgetEmbed() {
     if (window.initWebRTCWidget) {
       initialize();
       return () => {
-        observer.disconnect();
+        observer?.disconnect();
+        callObserver?.disconnect();
       };
     }
 
@@ -218,7 +232,8 @@ export function CognigyWidgetEmbed() {
       });
 
       return () => {
-        observer.disconnect();
+        observer?.disconnect();
+        callObserver?.disconnect();
       };
     }
 
@@ -247,7 +262,8 @@ export function CognigyWidgetEmbed() {
      * Limpeza do observer quando o componente for desmontado
      */
     return () => {
-      observer.disconnect();
+      observer?.disconnect();
+      callObserver?.disconnect();
     };
   }, [endpointUrl]);
 
