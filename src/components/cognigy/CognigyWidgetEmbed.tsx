@@ -40,7 +40,6 @@ export function CognigyWidgetEmbed() {
   // Sempre que a tela mudar (rota, seção, cartão aberto, comparação), avisa o agente
   // enquanto houver uma chamada ativa — assim ele "enxerga" o que o cliente está vendo.
   useEffect(() => {
-    if (!callActiveRef.current) return;
     sendPageContextToBackend(buildPageContext({
       pathname: location.pathname,
       section: bank.section,
