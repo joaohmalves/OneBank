@@ -1,8 +1,27 @@
 import { createContext, useContext, useState, useEffect, type ReactNode } from 'react';
 
+// ============================================================
+// Fonte da verdade da autenticação
+// ============================================================
+// `authenticated` só é ligado por um caminho: o redeem, no backend,
+// do código de troca (exchange code) gerado pelo DemoHub quando o
+// usuário abre a demo OneBank a partir de lá.
+//
+// O formulário de login (usuário/senha) que existe na página é
+// mantido apenas como SIMULAÇÃO visual do banco para a demo — ele
+// nunca autentica sozinho. Se alguém abrir o OneBank direto (sem
+// passar pelo DemoHub) e "logar" com usuario/123, o app reconhece
+// que as credenciais estão corretas, mas recusa o acesso porque
+// não existe uma sessão real (token) por trás.
+// ============================================================
+
+export type LoginResult = 'ok' | 'invalid-credentials' | 'no-token';
+
 interface AuthValue {
   authenticated: boolean;
-  login: (user: string, password: string) => boolean;
+  /** Login mock: valida usuário/senha, mas só libera o dashboard
+   * se já houver uma sessão real (token do DemoHub) resgatada. */
+  login: (user: string, password: string) => LoginResult;
   logout: () => void;
 }
 
@@ -11,24 +30,38 @@ const AuthContext = createContext<AuthValue | null>(null);
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL as string;
 
 export function AuthProvider({ children }: { children: ReactNode }) {
+  // Sessão real (token). É o único flag que controla as rotas protegidas.
   const [authenticated, setAuthenticated] = useState(
     () => sessionStorage.getItem('onebank-auth') === '1',
   );
 
-  const login = (u: string, p: string) => {
-    const ok = u === 'usuario' && p === '123';
-    if (ok) {
-      sessionStorage.setItem('onebank-auth', '1');
-      setAuthenticated(true);
+  const login = (u: string, p: string): LoginResult => {
+    const credentialsOk = u === 'usuario' && p === '123';
+
+    if (!credentialsOk) {
+      return 'invalid-credentials';
     }
-    return ok;
+
+    // Credenciais mock corretas, mas isso é só teatro de demo.
+    // O acesso real só é concedido se já existir uma sessão vinda
+    // do token resgatado do DemoHub.
+    if (!authenticated) {
+      return 'no-token';
+    }
+
+    return 'ok';
   };
 
   const logout = () => {
     sessionStorage.removeItem('onebank-auth');
+    sessionStorage.removeItem('onebank-user');
     setAuthenticated(false);
   };
 
+  // ============================================================
+  // Único ponto que liga `authenticated`: resgate do código de
+  // handoff (?code=...) recebido ao abrir esta página pelo DemoHub.
+  // ============================================================
   useEffect(() => {
     if (authenticated) return;
 
@@ -47,7 +80,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         });
 
         if (!res.ok) {
-          console.warn('[AuthContext] redeem-code falhou, seguindo pro login simulado');
+          console.warn('[AuthContext] redeem-code falhou; sem sessão real, login mock ficará bloqueado.');
           return;
         }
 

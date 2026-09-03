@@ -1,2 +1,62 @@
-import { useState } from 'react'; import { useNavigate } from 'react-router-dom'; import { WalletCards } from 'lucide-react'; import { useAuth } from '../contexts/AuthContext';
-export function Login(){const [user,setUser]=useState('usuario'),[pass,setPass]=useState('123'),[error,setError]=useState('');const {login}=useAuth();const nav=useNavigate();const submit=(e:React.FormEvent)=>{e.preventDefault();if(login(user,pass))nav('/dashboard');else setError('Usuário ou senha inválidos. Tente usuario / 123.');};return <main className="login"><section><div className="brand"><WalletCards/> OneBank</div><h1>Seu futuro financeiro começa aqui.</h1><p>Acesse sua conta e aproveite uma experiência bancária inteligente.</p><form onSubmit={submit}><label>Usuário<input value={user} onChange={e=>setUser(e.target.value)} autoFocus/></label><label>Senha<input type="password" value={pass} onChange={e=>setPass(e.target.value)}/></label>{error&&<p className="error">{error}</p>}<button className="primary">Entrar na conta</button><small>Demo: usuario / 123</small></form></section><aside><span>ONEBANK</span><h2>Banco que entende você.</h2><p>Tenha a Julia, nossa assistente virtual, sempre a um toque de distância.</p></aside></main>}
+import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { WalletCards } from 'lucide-react';
+import { useAuth } from '../contexts/AuthContext';
+
+export function Login() {
+  const [user, setUser] = useState('usuario');
+  const [pass, setPass] = useState('123');
+  const [error, setError] = useState('');
+  const { login } = useAuth();
+  const nav = useNavigate();
+
+  const submit = (e: React.FormEvent) => {
+    e.preventDefault();
+
+    const result = login(user, pass);
+
+    if (result === 'ok') {
+      nav('/dashboard');
+      return;
+    }
+
+    if (result === 'no-token') {
+      setError(
+        'Esta é apenas uma simulação de login. Para acessar o dashboard, abra esta demo a partir do Demo Hub.',
+      );
+      return;
+    }
+
+    setError('Usuário ou senha inválidos. Tente usuario / 123.');
+  };
+
+  return (
+    <main className="login">
+      <section>
+        <div className="brand">
+          <WalletCards /> OneBank
+        </div>
+        <h1>Seu futuro financeiro começa aqui.</h1>
+        <p>Acesse sua conta e aproveite uma experiência bancária inteligente.</p>
+        <form onSubmit={submit}>
+          <label>
+            Usuário
+            <input value={user} onChange={(e) => setUser(e.target.value)} autoFocus />
+          </label>
+          <label>
+            Senha
+            <input type="password" value={pass} onChange={(e) => setPass(e.target.value)} />
+          </label>
+          {error && <p className="error">{error}</p>}
+          <button className="primary">Entrar na conta</button>
+          <small>Demo: usuario / 123</small>
+        </form>
+      </section>
+      <aside>
+        <span>ONEBANK</span>
+        <h2>Banco que entende você.</h2>
+        <p>Tenha a Julia, nossa assistente virtual, sempre a um toque de distância.</p>
+      </aside>
+    </main>
+  );
+}
