@@ -29,14 +29,21 @@ declare global {
       endpointUrl: string,
       options?: unknown
     ) => Promise<{ on: (event: string, cb: (arg: unknown) => void) => void }>;
+    destroyWebRTCWidget?: () => void;
   }
 }
 
-let initialization: Promise<unknown> | null = null;
+// Timeout por tentativa e nº de retries antes de desistir e mostrar erro.
+// Existem porque o initWebRTCWidget() pode ficar pendurado indefinidamente
+// (fetch interno sem timeout / WebSocket que nunca conecta), travando o
+// botão de chamada até o usuário dar F5. Ver histórico do chat para detalhes.
+const WIDGET_INIT_TIMEOUT_MS = 8000;
+const WIDGET_MAX_RETRIES = 2;
 
 export function CognigyWidgetEmbed() {
   const endpointUrl = import.meta.env.VITE_COGNIGY_ENDPOINT_URL;
   const [error, setError] = useState('');
+  const [status, setStatus] = useState<string | null>(null);
   const [open, setOpen] = useState(false);
   const location = useLocation();
   const bank = useBanking();
@@ -52,9 +59,10 @@ export function CognigyWidgetEmbed() {
       selectedCard: bank.selectedCard,
       cardOpen: bank.cardDetail,
       comparisonOpen: bank.comparison,
+      selectedMachine: bank.selectedMachine,
     };
     sendPageContextToBackend(buildPageContext(args), buildPageDescription(args));
-  }, [location.pathname, bank.section, bank.selectedCard, bank.cardDetail, bank.comparison]);
+  }, [location.pathname, bank.section, bank.selectedCard, bank.cardDetail, bank.comparison, bank.selectedMachine]);
 
 
   useEffect(() => {
@@ -159,6 +167,7 @@ export function CognigyWidgetEmbed() {
             selectedCard: bank.selectedCard,
             cardOpen: bank.cardDetail,
             comparisonOpen: bank.comparison,
+            selectedMachine: bank.selectedMachine,
           };
           sendPageContextToBackend(buildPageContext(args), buildPageDescription(args));
         } else if (!isActive && callActiveRef.current) {
@@ -170,98 +179,144 @@ export function CognigyWidgetEmbed() {
       check();
     };
 
-    const initialize = () => {
-      if (initialization || !window.initWebRTCWidget) {
-        return;
+    let cancelled = false;
+    let retryTimer: number | undefined;
+    let attempt = 0;
+
+    const WIDGET_SCRIPT_URL =
+      'https://github.com/Cognigy/click-to-call-widget/releases/latest/download/webRTCWidget.js';
+
+    const removeExistingScript = () => {
+      document
+        .querySelector<HTMLScriptElement>('script[data-cognigy-widget]')
+        ?.remove();
+    };
+
+    // Carrega o <script> do zero a cada tentativa. No retry, adiciona
+    // cache-bust na URL pra evitar que o navegador reutilize uma resposta
+    // (ou um estado interno do script) que ficou travado da vez anterior.
+    const loadScript = () =>
+      new Promise<void>((resolve, reject) => {
+        removeExistingScript();
+
+        const script = document.createElement('script');
+        script.src =
+          attempt === 0
+            ? WIDGET_SCRIPT_URL
+            : `${WIDGET_SCRIPT_URL}?_retry=${Date.now()}`;
+        script.async = true;
+        script.dataset.cognigyWidget = 'true';
+        script.onload = () => resolve();
+        script.onerror = () =>
+          reject(new Error('Falha ao baixar o script do widget Cognigy (rede/CDN).'));
+
+        document.body.appendChild(script);
+      });
+
+    // Corre o initWebRTCWidget() contra um relógio: se ele não resolver nem
+    // rejeitar dentro do timeout (o fetch de config interno do widget não
+    // tem timeout próprio e pode ficar pendurado pra sempre), desistimos
+    // dessa tentativa em vez de travar o botão indefinidamente.
+    const initWithTimeout = () =>
+      new Promise<void>((resolve, reject) => {
+        if (!window.initWebRTCWidget) {
+          reject(new Error('initWebRTCWidget não disponível após carregar o script.'));
+          return;
+        }
+
+        let settled = false;
+        const timer = window.setTimeout(() => {
+          if (settled) return;
+          settled = true;
+          reject(new Error(`Timeout: widget não respondeu em ${WIDGET_INIT_TIMEOUT_MS}ms.`));
+        }, WIDGET_INIT_TIMEOUT_MS);
+
+        window
+          .initWebRTCWidget(endpointUrl, {
+            userId:
+              import.meta.env.VITE_COGNIGY_USER_ID ||
+              'onebank-demo-user',
+
+            ui: {
+              labels: {
+                callButton: 'Falar com a Julia',
+                endButton: 'Encerrar chamada',
+                listenLabel: 'Julia está ouvindo',
+              },
+            },
+          })
+          .then(() => {
+            if (settled) return;
+            settled = true;
+            window.clearTimeout(timer);
+            resolve();
+          })
+          .catch((reason: unknown) => {
+            if (settled) return;
+            settled = true;
+            window.clearTimeout(timer);
+            reject(reason instanceof Error ? reason : new Error(String(reason)));
+          });
+      });
+
+    const attemptInit = () => {
+      if (cancelled) return;
+
+      setError('');
+      setStatus(
+        attempt === 0
+          ? 'Conectando…'
+          : `Conectando… (tentativa ${attempt + 1} de ${WIDGET_MAX_RETRIES + 1})`
+      );
+
+      // Limpa qualquer instância anterior travada antes de tentar de novo.
+      if (window.destroyWebRTCWidget) {
+        try {
+          window.destroyWebRTCWidget();
+        } catch {
+          // ignora erro de cleanup — o importante é seguir pra próxima tentativa
+        }
       }
 
-      initialization = window
-        .initWebRTCWidget(endpointUrl, {
-          userId:
-            import.meta.env.VITE_COGNIGY_USER_ID ||
-            'onebank-demo-user',
-
-          ui: {
-            labels: {
-              callButton: 'Falar com a Julia',
-              endButton: 'Encerrar chamada',
-              listenLabel: 'Julia está ouvindo',
-            },
-          },
-        })
+      loadScript()
+        .then(() => initWithTimeout())
         .then(() => {
+          if (cancelled) return;
+
+          setStatus(null);
+          attempt = 0;
+
           // Só agora, com o widget pronto, começamos a corrigir a estrutura do DOM
           // e a observar o estado da chamada.
           startObservingAfterWidgetReady();
           startWatchingCallState();
         })
         .catch((reason: unknown) => {
-          console.error(
-            'Falha ao iniciar o widget Cognigy:',
-            reason
-          );
+          if (cancelled) return;
 
-          setError(
-            'O Cognigy recusou a inicialização. Veja o Console do navegador.'
-          );
+          console.warn(`[CognigyWidgetEmbed] tentativa ${attempt + 1} falhou:`, reason);
+          attempt += 1;
+
+          if (attempt <= WIDGET_MAX_RETRIES) {
+            setStatus(
+              `Falha ao conectar. Tentando novamente… (${attempt + 1}/${WIDGET_MAX_RETRIES + 1})`
+            );
+            retryTimer = window.setTimeout(attemptInit, 800);
+          } else {
+            setStatus(null);
+            setError('O Cognigy recusou a inicialização. Veja o Console do navegador.');
+          }
         });
     };
 
-    /*
-     * Se o script já estiver carregado
-     */
-    if (window.initWebRTCWidget) {
-      initialize();
-      return () => {
-        observer?.disconnect();
-        callObserver?.disconnect();
-      };
-    }
+    attemptInit();
 
     /*
-     * Verifica se o script já está sendo carregado
-     */
-    const existing =
-      document.querySelector<HTMLScriptElement>(
-        'script[data-cognigy-widget]'
-      );
-
-    if (existing) {
-      existing.addEventListener('load', initialize, {
-        once: true,
-      });
-
-      return () => {
-        observer?.disconnect();
-        callObserver?.disconnect();
-      };
-    }
-
-    /*
-     * Carrega o script do Cognigy
-     */
-    const script = document.createElement('script');
-
-    script.src =
-      'https://github.com/Cognigy/click-to-call-widget/releases/latest/download/webRTCWidget.js';
-
-    script.async = true;
-    script.dataset.cognigyWidget = 'true';
-
-    script.onload = initialize;
-
-    script.onerror = () => {
-      console.error(
-        'Não foi possível carregar o Click-to-Call Widget do Cognigy.'
-      );
-    };
-
-    document.body.appendChild(script);
-
-    /*
-     * Limpeza do observer quando o componente for desmontado
+     * Limpeza dos observers e do retry pendente quando o componente for desmontado
      */
     return () => {
+      cancelled = true;
+      if (retryTimer) window.clearTimeout(retryTimer);
       observer?.disconnect();
       callObserver?.disconnect();
     };
@@ -286,6 +341,13 @@ export function CognigyWidgetEmbed() {
         >
           ×
         </button>
+      )}
+
+      {status && (
+        <div className="cognigy-widget-status" role="status" aria-live="polite">
+          <span className="cognigy-widget-status-spinner" />
+          {status}
+        </div>
       )}
 
       {error && (

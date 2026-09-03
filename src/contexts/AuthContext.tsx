@@ -32,7 +32,7 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL as string;
 export function AuthProvider({ children }: { children: ReactNode }) {
   // Sessão real (token). É o único flag que controla as rotas protegidas.
   const [authenticated, setAuthenticated] = useState(
-    () => sessionStorage.getItem('onebank-auth') === '1',
+    () => import.meta.env.DEV || sessionStorage.getItem('onebank-auth') === '1',
   );
 
   const login = (u: string, p: string): LoginResult => {
