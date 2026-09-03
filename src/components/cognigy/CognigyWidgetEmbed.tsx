@@ -40,6 +40,63 @@ declare global {
 const WIDGET_INIT_TIMEOUT_MS = 8000;
 const WIDGET_MAX_RETRIES = 2;
 
+const WIDGET_SCRIPT_URL =
+  'https://github.com/Cognigy/click-to-call-widget/releases/latest/download/webRTCWidget.js';
+
+// Singleton em nível de módulo: garante que o <script> do widget só é
+// injetado no DOM uma única vez, mesmo com o double-mount do
+// React.StrictMode em dev ou remounts do componente. Ver comentário
+// detalhado dentro do useEffect abaixo.
+let widgetScriptPromise: Promise<void> | null = null;
+
+function loadWidgetScriptOnce(): Promise<void> {
+  // Script já executou com sucesso nesta página (nesta sessão ou numa
+  // montagem anterior do componente) — não injeta de novo.
+  if (window.initWebRTCWidget) {
+    return Promise.resolve();
+  }
+
+  if (widgetScriptPromise) {
+    return widgetScriptPromise;
+  }
+
+  widgetScriptPromise = new Promise<void>((resolve, reject) => {
+    const existing = document.querySelector<HTMLScriptElement>(
+      'script[data-cognigy-widget]'
+    );
+
+    if (existing) {
+      // Já existe uma tag no DOM (de uma montagem anterior). Não
+      // duplicamos — só penduramos nos callbacks dela.
+      existing.addEventListener('load', () => resolve(), { once: true });
+      existing.addEventListener(
+        'error',
+        () => reject(new Error('Falha ao baixar o script do widget Cognigy (rede/CDN).')),
+        { once: true }
+      );
+      return;
+    }
+
+    const script = document.createElement('script');
+    script.src = WIDGET_SCRIPT_URL;
+    script.async = true;
+    script.dataset.cognigyWidget = 'true';
+    script.onload = () => resolve();
+    script.onerror = () => {
+      // Falhou antes de executar (erro de rede) — nunca chegou a rodar,
+      // então é seguro remover e permitir uma nova tentativa de download
+      // sem risco de redeclaração de identificadores globais.
+      script.remove();
+      widgetScriptPromise = null;
+      reject(new Error('Falha ao baixar o script do widget Cognigy (rede/CDN).'));
+    };
+
+    document.body.appendChild(script);
+  });
+
+  return widgetScriptPromise;
+}
+
 export function CognigyWidgetEmbed() {
   const endpointUrl = import.meta.env.VITE_COGNIGY_ENDPOINT_URL;
   const [error, setError] = useState('');
@@ -183,35 +240,25 @@ export function CognigyWidgetEmbed() {
     let retryTimer: number | undefined;
     let attempt = 0;
 
-    const WIDGET_SCRIPT_URL =
-      'https://github.com/Cognigy/click-to-call-widget/releases/latest/download/webRTCWidget.js';
+    // Carrega o <script> UMA ÚNICA VEZ para a vida inteira da página.
+    //
+    // Por quê: webRTCWidget.js não é um módulo — ele declara dezenas de
+    // `const`/`class` no escopo top-level do arquivo (const eV=..., class
+    // Qu extends..., class zu extends...). Se essa tag <script> for
+    // removida e reinjetada (ex.: por causa do StrictMode do React, que
+    // monta -> desmonta -> monta de novo o efeito em dev), o navegador
+    // executa o arquivo pela segunda vez e tenta redeclarar os mesmos
+    // identificadores globais -> SyntaxError -> a execução aborta ANTES
+    // de chegar na linha final `window.initWebRTCWidget = $u` -> nada
+    // mais carrega, nem com F5 simples. Foi exatamente isso que quebrou
+    // na versão anterior deste arquivo.
+    //
+    // Por isso o load do script fica num singleton em nível de módulo
+    // (sobrevive ao double-mount do StrictMode) e nunca é refeito. Retry
+    // de falha de rede/timeout mexe só na chamada de initWebRTCWidget(),
+    // que o próprio bundle já protege internamente (a função exportada
+    // chama destroy() antes de cada init, então é segura pra repetir).
 
-    const removeExistingScript = () => {
-      document
-        .querySelector<HTMLScriptElement>('script[data-cognigy-widget]')
-        ?.remove();
-    };
-
-    // Carrega o <script> do zero a cada tentativa. No retry, adiciona
-    // cache-bust na URL pra evitar que o navegador reutilize uma resposta
-    // (ou um estado interno do script) que ficou travado da vez anterior.
-    const loadScript = () =>
-      new Promise<void>((resolve, reject) => {
-        removeExistingScript();
-
-        const script = document.createElement('script');
-        script.src =
-          attempt === 0
-            ? WIDGET_SCRIPT_URL
-            : `${WIDGET_SCRIPT_URL}?_retry=${Date.now()}`;
-        script.async = true;
-        script.dataset.cognigyWidget = 'true';
-        script.onload = () => resolve();
-        script.onerror = () =>
-          reject(new Error('Falha ao baixar o script do widget Cognigy (rede/CDN).'));
-
-        document.body.appendChild(script);
-      });
 
     // Corre o initWebRTCWidget() contra um relógio: se ele não resolver nem
     // rejeitar dentro do timeout (o fetch de config interno do widget não
@@ -278,7 +325,7 @@ export function CognigyWidgetEmbed() {
         }
       }
 
-      loadScript()
+      loadWidgetScriptOnce()
         .then(() => initWithTimeout())
         .then(() => {
           if (cancelled) return;
